@@ -1,21 +1,146 @@
+# Install Rfacebook package
+# install_github("Rfacebook", "pablobarbera", subdir="Rfacebook")
+
+# Function
+unlistWithNA <- function(lst, field){
+  if (length(field)==1){
+    notnulls <- unlist(lapply(lst, function(x) !is.null(x[[field]])))
+    vect <- rep(NA, length(lst))
+    vect[notnulls] <- unlist(lapply(lst, '[[', field))
+  }
+  if (length(field)==2){
+    notnulls <- unlist(lapply(lst, function(x) !is.null(x[[field[1]]][[field[2]]])))
+    vect <- rep(NA, length(lst))
+    vect[notnulls] <- unlist(lapply(lst, function(x) x[[field[1]]][[field[2]]]))
+  }
+  if (field[1]=="shares"){
+    notnulls <- unlist(lapply(lst, function(x) !is.null(x[[field[1]]][[field[2]]])))
+    vect <- rep(0, length(lst))
+    vect[notnulls] <- unlist(lapply(lst, function(x) x[[field[1]]][[field[2]]]))
+  }
+  if (length(field)==3){
+    notnulls <- unlist(lapply(lst, function(x)
+      tryCatch(!is.null(x[[field[1]]][[field[2]]][[field[3]]]),
+               error=function(e) FALSE)))
+    vect <- rep(NA, length(lst))
+    vect[notnulls] <- unlist(lapply(lst[notnulls], function(x) x[[field[1]]][[field[2]]][[field[3]]]))
+  }
+  if (length(field)==4 & field[1]=="to"){
+    notnulls <- unlist(lapply(lst, function(x)
+      tryCatch(!is.null(x[[field[1]]][[field[2]]][[as.numeric(field[3])]][[field[4]]]),
+               error=function(e) FALSE)))
+    vect <- rep(NA, length(lst))
+    vect[notnulls] <- unlist(lapply(lst[notnulls], function(x) x[[field[1]]][[field[2]]][[as.numeric(field[3])]][[field[4]]]))
+  }
+  if (field[1] %in% c("comments", "likes") & !is.na(field[2])){
+    notnulls <- unlist(lapply(lst, function(x) !is.null(x[[field[1]]][[field[2]]][[field[3]]])))
+    vect <- rep(0, length(lst))
+    vect[notnulls] <- unlist(lapply(lst, function(x) x[[field[1]]][[field[2]]][[field[3]]]))
+  }
+  return(vect)
+}
+
+
 # Load libraries
 library("devtools")
-
-# Install Rfacebook package
-install_github("Rfacebook", "pablobarbera", subdir="Rfacebook")
 library("Rfacebook")
+library("RCurl")
+library("httr")
+library("rjson")
 
-# Access Token "https://developers.facebook.com/tools/explorer"
-token <- "CAACEdEose0cBACj22bZAjfowVZC0ZCuGLqK9i7Rafvpz4TVTQyFTycPbuzlYDo40XZCCSbGPeMiHOzr02iC2fGjaxHB6WSOZAygorqRT6dl8hbZAe1JZAdOk5GaUZC8aBnEN4ozZAwtBnfSKbF63NwVPuzQ1b356UYXgOSNMFpEaNthUSuhxWKPAJG0fgEWAgqyYAGYyZBtBcSMKyA6pAKS6NRq6uFC0WSKR4ZD"
+# Access Token "https://developers.facebook.com/tools/explorer" - Remember yourself that the token expires in 2 hours.
+token <- "CAACEdEose0cBAPO2AOXpq4tllwcxkLxM6EqnrYLRs9NZAOXtBrO10fHdZAXEdZCFo4S9JYA3fLOYKciOYBvkZCknMDxng4wJNOP6efpO3TZB9RS8cp3ZAelXxZCCixCFdqD07b7UD1dH4m9J3XDCaR3Iaz8NrkZCAHqbxZB93ZBpLgthVyJQS68ZAK9trqwK0IOZCyHP3v9BHUsbkFMIlmqmQrhA95kY4ZCZBvjxMZD"
 
-# Reach my account
-me <- getUsers("me", token = token)
 
-# List my Friends
-myFriends  <- getFriends(token, simplify = TRUE)
+##########################
+# Get groups -------------
+##########################
 
-# Analyse my friends data
-myFriendsList <- getUsers(myFriends$id[1:250], token, private_info = TRUE)
+# Group ID
+groupID <- "379869335364146"
+
+# Number of cases
+n  <- 500
+
+# Create ULR
+url  <- paste0("https://graph.facebook.com/", groupID, "?fields=feed.limit(", n, "){from,message,created_time,type,link,comments.summary(true),likes.summary(true)}&locale=pt_BR&access_token=", token)
+
+# Get json file using httr package
+getUrl  <- GET(url)
+
+# Convert JSON object into an R
+content  <- fromJSON(rawToChar(getUrl$content))
+
+# Loop list
+ids  <- do.call("rbind", lapply(content$feed$data, "[[", 1))       # User ID and Name
+msgs  <- do.call("rbind", lapply(content$feed$data, "[[", 2))      # Message
+time  <- do.call("rbind", lapply(content$feed$data, "[[", 3))      # Time Created
+
+# Create DataFrame
+df  <- data.frame(ids = ids, msgs = msgs, time = time, stringsAsFactors = FALSE)
+
+# Function which does it all
+
+getGroup <- function(groupID, n, token) {
+  
+  url  <- paste0("https://graph.facebook.com/", groupID, "?fields=feed.limit(", n, "){from,message,created_time,type,link,comments.summary(true),likes.summary(true)}&locale=pt_BR&access_token=", token)
+  getUrl  <- GET(url)
+  content  <- fromJSON(rawToChar(getUrl$content))
+  
+  ids  <- do.call("rbind", lapply(content$feed$data, "[[", 1))       # User ID and Name
+  msgs  <- do.call("rbind", lapply(content$feed$data, "[[", 2))      # Message
+  time  <- do.call("rbind", lapply(content$feed$data, "[[", 3))      # Time Created
+  
+  df  <- data.frame(ids = ids, msgs = msgs, time = time, stringsAsFactors = FALSE)
+  
+  df$ids.id <- unlist(df$ids.id)
+  df$ids.name <- unlist(df$ids.name)
+  
+  
+  return(df)
+  
+}
+
+df <- getGroup("438253896268176", 1000, token)
+
+
+# Save for Text Mining
+write.csv(df, "group379869335364146.csv")
+
+
+
+# My Bin ------
+
+unlist(content$feed$data[[5]]$from$id) # User ID
+unlist(content$feed$data[[5]]$from$name) # User Name
+unlist(content$feed$data[[5]]$message) # Message
+unlist(content$feed$data[[5]]$created_time) # Time created
+unlist(content$feed$data[[5]]$type) # Type: photo or status
+unlist(content$feed$data[[5]]$likes$summary$total_count) # Total Likes
+unlist(content$feed$data[[5]]$comments$summary$total_count) # Total Comments
+
+is.null(content$feed$data[[1]][[8]][[3]][[2]])
+
+
+
+# Testar se a lista é nula
+
+unlist(lapply(content$feed$data, function (x) !is.null(x[[8]][[3]][[2]])))
+
+
+
+  
+!is.null(content$feed$data[[5]]$comments$summary$total_count)
+
+unlist(lapply(content$feed$data, function(x) !is.null(x[[]])    ))
+
+
+
+
+
+
+unlist(lapply(content$feed$data, function(x) !is.null(x[[1]])))
+
 
 # Get network ----
 mat <- getNetwork(token, format="adj.matrix")
@@ -146,7 +271,22 @@ pq <- p + geom_segment(
 pq
 
 
-# Other analyses
+# Other analyses ---- 
+
+
+# Reach my account
+me <- getUsers("me", token = token)
+
+# List my Friends
+myFriends  <- getFriends(token, simplify = TRUE)
+
+# Analyse my friends data
+# API has limited users number
+myFriendsList1 <- getUsers(myFriends$id[1:250], token, private_info = TRUE)
+myFriendsList2 <- getUsers(myFriends$id[251:560], token, private_info = TRUE)
+
+# Combine My Friends List
+myFriendsList  <- rbind(myFriendsList1, myFriendsList2)
 
 getPage("vivasemtabaco", token, n = 100, feed = FALSE)
 cigarro  <- searchFacebook("dilma", token, n = 100, since = NULL, until = NULL)
